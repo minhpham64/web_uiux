@@ -168,6 +168,15 @@ td:last-child { text-align: right; font-weight: 700; }
 .debt-section { margin-bottom: 16px; overflow: hidden; }
 .debt-title { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }.debt-title h2 { font-size: 15px; }.debt-title .barline { width: 8px; height: 30px; border-radius: 9px; background: var(--green); }.debt-title .barline.red { background: var(--red); }
 .debt-title .push { margin-left: auto; }
+.debt-status { border: 0; border-radius: 20px; padding: 5px 10px; background: #f1f5f9; color: #64748b; font-size: 11px; cursor: pointer; transition: transform .2s ease, filter .2s ease; }
+.debt-status:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(.97); }
+.debt-status.green { color: var(--green); background: #e8faf2; }.debt-status.amber { color: var(--amber); background: #fff8e6; }.debt-status.red { color: var(--red); background: #fff0f3; }
+.debt-status:disabled { cursor: default; opacity: .8; }
+.debt-reminders { margin-bottom: 16px; border-left: 4px solid var(--red); }
+.reminder-title { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.reminder-title .pill { margin-left: auto; }
+.reminder-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.reminder-row small { display: block; color: var(--muted); margin-top: 4px; }
 
 .metric-bars { display: flex; align-items: end; justify-content: space-around; height: 240px; padding-top: 15px; }
 .metric-bar { width: 42px; border-radius: 8px 8px 0 0; background: #6366e9; position: relative; }.metric-bar.green { background: var(--green); }.metric-bar span { position: absolute; top: -22px; width: 100%; text-align: center; color: #56647d; font-size: 11px; font-weight: 700; }.metric-bar small { position: absolute; bottom: -25px; width: 100%; text-align: center; color: var(--muted); }
