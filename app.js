@@ -12,6 +12,11 @@ const DEFAULT_STATE = {
     borrow: []
   }
 };
+const BASE_WALLETS = {
+  vcb: 2350000,
+  momo: 780000,
+  cash: 320000
+};
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -68,15 +73,39 @@ function toast(message) {
 }
 
 function updateSummary() {
-  const balance = sessionState.income - sessionState.expense - sessionState.loaned + sessionState.borrowed;
+  const wallets = walletBalances();
+  const balance = Object.values(wallets).reduce((sum, amount) => sum + amount, 0);
   const remaining = Math.max(sessionState.budget - sessionState.expense, 0);
   document.querySelector('[data-role="balance"]')?.replaceChildren(document.createTextNode(money(balance)));
   document.querySelector('[data-role="income-total"]')?.replaceChildren(document.createTextNode(`+${money(sessionState.income)}`));
   document.querySelector('[data-role="expense-total"]')?.replaceChildren(document.createTextNode(`-${money(sessionState.expense)}`));
   document.querySelector('[data-role="budget-remaining"]')?.replaceChildren(document.createTextNode(`Còn lại ${money(remaining)}`));
   document.querySelector('[data-role="budget-spent"]')?.replaceChildren(document.createTextNode(money(sessionState.expense)));
+  document.querySelector('[data-role="income-caption"]')?.replaceChildren(document.createTextNode(`+${money(sessionState.income)}`));
+  document.querySelector('[data-role="expense-caption"]')?.replaceChildren(document.createTextNode(`-${money(sessionState.expense)}`));
+  document.querySelector('[data-role="budget-available"]')?.replaceChildren(document.createTextNode(money(remaining)));
   const budgetProgress = document.querySelector('[data-role="budget-progress"]');
   if (budgetProgress) budgetProgress.style.width = `${Math.min((sessionState.expense / sessionState.budget) * 100, 100)}%`;
+  document.querySelectorAll('[data-wallet]').forEach((node) => {
+    const amount = wallets[node.dataset.wallet] || 0;
+    node.textContent = money(amount);
+  });
+}
+
+function walletKey(wallet) {
+  if (wallet === 'VCB Student') return 'vcb';
+  if (wallet === 'Ví MoMo') return 'momo';
+  return 'cash';
+}
+
+function walletBalances() {
+  const balances = { ...BASE_WALLETS };
+  sessionState.transactions.forEach((item) => {
+    const key = walletKey(item.wallet);
+    const positive = item.type === 'income' || item.type === 'borrow';
+    balances[key] += positive ? item.amount : -item.amount;
+  });
+  return balances;
 }
 
 function transactionDetail(item) {
@@ -207,7 +236,8 @@ function processModal(modal) {
   } else if (modal.id === 'expense-modal') {
     const label = textFrom(modal, 0);
     const category = selectFrom(modal, 0);
-    addTransaction({ type: 'expense', label, category, wallet: 'Tiền mặt', amount: value, date: `Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
+    const wallet = selectFrom(modal, 1) || 'Tiền mặt';
+    addTransaction({ type: 'expense', label, category, wallet, amount: value, date: `Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
     toast(`Đã lưu và đồng bộ khoản chi ${money(value)} trên toàn bộ trang.`);
   } else if (modal.id === 'saving-modal') {
     const goalIndex = modal.querySelector('select')?.selectedIndex || 0;
