@@ -1,15 +1,39 @@
-const sessionState = {
+const STORAGE_KEY = 'unifin-local-v1';
+const DEFAULT_STATE = {
   income: 6500000,
   expense: 3050000,
   budget: 5000000,
-  recent: [],
-  chartMode: 'bars'
+  transactions: []
 };
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function loadState() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? { ...clone(DEFAULT_STATE), ...JSON.parse(stored) } : clone(DEFAULT_STATE);
+  } catch {
+    return clone(DEFAULT_STATE);
+  }
+}
+
+const sessionState = loadState();
+
+function persistState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionState));
+  } catch {
+    toast('Không thể đồng bộ dữ liệu tạm của phiên này.');
+  }
+}
 
 const money = (value) => `${new Intl.NumberFormat('vi-VN').format(Math.round(value))} đ`;
 const amountFrom = (modal) => Number(modal.querySelector('input[type="number"]')?.value || 0);
 const textFrom = (modal, index) => modal.querySelectorAll('input')[index]?.value?.trim() || 'Khoản mới';
 const selectFrom = (modal, index) => modal.querySelectorAll('select')[index]?.value || '';
+const isPage = (name) => location.pathname.endsWith(name);
 
 function toast(message) {
   let node = document.querySelector('.toast');
@@ -33,35 +57,57 @@ function updateSummary() {
   document.querySelector('[data-role="budget-remaining"]')?.replaceChildren(document.createTextNode(`Còn lại ${money(remaining)}`));
 }
 
-function addRecentItem(label, detail, value, isIncome) {
+function transactionDetail(item) {
+  return `${item.type === 'income' ? 'Thu nhập' : item.category} • ${item.wallet} • ${item.date}`;
+}
+
+function transactionRow(item) {
+  const sign = item.type === 'income' ? '+' : '-';
+  const category = item.type === 'income' ? 'Khoản mới' : 'Khoản mới';
+  return `<tr class="session-row"><td>${item.date}</td><td><span class="pill${item.type === 'income' ? ' green' : ''}">${category}</span></td><td><strong>${item.label}</strong></td><td>${item.wallet}</td><td class="amount${item.type === 'income' ? ' green' : ''}">${sign}${money(item.amount)}</td></tr>`;
+}
+
+function renderSessionTables() {
+  const body = document.querySelector('table tbody');
+  if (!body) return;
+  body.querySelectorAll('.session-row').forEach((row) => row.remove());
+  const items = sessionState.transactions.filter((item) => {
+    if (isPage('income.html')) return item.type === 'income';
+    if (isPage('transactions.html')) return true;
+    return false;
+  });
+  [...items].reverse().forEach((item) => body.insertAdjacentHTML('afterbegin', transactionRow(item)));
+}
+
+function renderRecentTransactions() {
   const target = document.querySelector('#recent-transactions');
   if (!target) return;
-  const row = document.createElement('div');
-  row.className = 'list-row session-row';
-  row.innerHTML = `<span><strong>${label}</strong><small>${detail}</small></span><b class="amount${isIncome ? ' green' : ''}">${isIncome ? '+' : '-'}${money(value)}</b>`;
-  target.prepend(row);
-  while (target.children.length > 5) target.lastElementChild.remove();
+  target.querySelectorAll('.session-row').forEach((row) => row.remove());
+  [...sessionState.transactions].reverse().forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'list-row session-row';
+    row.innerHTML = `<span><strong>${item.type === 'income' ? '▣' : '•'} ${item.label}</strong><small>${transactionDetail(item)}</small></span><b class="amount${item.type === 'income' ? ' green' : ''}">${item.type === 'income' ? '+' : '-'}${money(item.amount)}</b>`;
+    target.prepend(row);
+  });
+  while (target.children.length > 8) target.lastElementChild.remove();
 }
 
-function appendIncomeRow(label, amount, wallet) {
-  const body = document.querySelector('table tbody');
-  if (!body || !location.pathname.endsWith('income.html')) return;
-  const row = document.createElement('tr');
-  row.className = 'session-row';
-  row.innerHTML = `<td>Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</td><td><span class="pill green">Khoản mới</span></td><td><strong>${label}</strong></td><td>${wallet}</td><td class="amount green">+${money(amount)}</td>`;
-  body.prepend(row);
+function renderAllSessionData() {
+  updateSummary();
+  renderRecentTransactions();
+  renderSessionTables();
+  renderChart(sessionState.chartMode || 'bars');
 }
 
-function appendExpenseRow(label, amount, category) {
-  const body = document.querySelector('table tbody');
-  if (!body || !location.pathname.endsWith('transactions.html')) return;
-  const row = document.createElement('tr');
-  row.className = 'session-row';
-  row.innerHTML = `<td>Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</td><td><span class="pill">Khoản mới</span></td><td><strong>${label}</strong></td><td>Tiền mặt</td><td>-${money(amount)}</td>`;
-  body.prepend(row);
+function addTransaction(item) {
+  sessionState.transactions.unshift(item);
+  if (item.type === 'income') sessionState.income += item.amount;
+  if (item.type === 'expense') sessionState.expense += item.amount;
+  persistState();
+  renderAllSessionData();
 }
 
-function renderChart(mode = sessionState.chartMode) {
+function renderChart(mode = 'bars') {
   const chart = document.querySelector('#cashflow-chart');
   if (!chart) return;
   sessionState.chartMode = mode;
@@ -71,8 +117,7 @@ function renderChart(mode = sessionState.chartMode) {
   };
   if (mode === 'line') {
     const data = sets.bars;
-    const max = 8;
-    const points = (values) => values.map((value, index) => `${index * 20 + 10},${100 - (value / max) * 84}`).join(' ');
+    const points = (values) => values.map((value, index) => `${index * 20 + 10},${100 - (value / 8) * 84}`).join(' ');
     chart.className = 'line-chart';
     chart.innerHTML = `<svg viewBox="0 0 120 100" preserveAspectRatio="none" aria-label="Biểu đồ đường dòng tiền"><path class="line-grid" d="M0 16H120 M0 42H120 M0 68H120 M0 94H120"></path><polyline class="income-line" points="${points(data.income)}"></polyline><polyline class="expense-line" points="${points(data.expense)}"></polyline></svg><div class="line-labels">${data.labels.map((label) => `<span>${label}</span>`).join('')}</div>`;
   } else {
@@ -93,24 +138,18 @@ function processModal(modal) {
   if (modal.id === 'income-modal') {
     const label = textFrom(modal, 0);
     const wallet = selectFrom(modal, 0);
-    sessionState.income += value;
-    addRecentItem(`▣ ${label}`, `Thu nhập • ${wallet} • Vừa thêm`, value, true);
-    appendIncomeRow(label, value, wallet);
-    toast(`Đã thêm khoản thu ${money(value)} (chỉ lưu trong phiên này).`);
+    addTransaction({ type: 'income', label, wallet, amount: value, date: `Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
+    toast(`Đã lưu và đồng bộ khoản thu ${money(value)} trên toàn bộ trang.`);
   } else if (modal.id === 'expense-modal') {
     const label = textFrom(modal, 0);
     const category = selectFrom(modal, 0);
-    sessionState.expense += value;
-    addRecentItem(`• ${label}`, `${category} • Tiền mặt • Vừa thêm`, value, false);
-    appendExpenseRow(label, value, category);
-    toast(`Đã thêm khoản chi ${money(value)} (chỉ lưu trong phiên này).`);
+    addTransaction({ type: 'expense', label, category, wallet: 'Tiền mặt', amount: value, date: `Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
+    toast(`Đã lưu và đồng bộ khoản chi ${money(value)} trên toàn bộ trang.`);
   } else if (modal.id === 'saving-modal') {
-    toast(`Đã nạp ${money(value)} vào quỹ tạm thời. Sau khi tải lại sẽ khôi phục dữ liệu mẫu.`);
+    toast(`Đã lưu khoản nạp ${money(value)} vào quỹ trên trình duyệt.`);
   } else if (modal.id === 'debt-modal') {
-    toast(`Đã thêm khoản vay/mượn ${money(value)} vào phiên hiện tại.`);
+    toast(`Đã lưu khoản vay/mượn ${money(value)} vào trình duyệt.`);
   }
-  updateSummary();
-  renderChart();
   return true;
 }
 
@@ -124,11 +163,9 @@ document.querySelectorAll('[data-open-modal]').forEach((button) => {
 document.querySelectorAll('[data-close-modal]').forEach((button) => {
   button.addEventListener('click', (event) => {
     const modal = button.closest('.modal-backdrop');
-    if (button.classList.contains('btn')) {
-      if (!processModal(modal)) {
-        event.preventDefault();
-        return;
-      }
+    if (button.classList.contains('btn') && !processModal(modal)) {
+      event.preventDefault();
+      return;
     }
     modal?.classList.remove('open');
   });
@@ -141,8 +178,11 @@ document.querySelectorAll('.modal-backdrop').forEach((backdrop) => {
 });
 
 document.querySelectorAll('[data-chart-mode]').forEach((button) => {
-  button.addEventListener('click', () => renderChart(button.dataset.chartMode));
+  button.addEventListener('click', () => {
+    sessionState.chartMode = button.dataset.chartMode;
+    persistState();
+    renderChart(sessionState.chartMode);
+  });
 });
 
-updateSummary();
-renderChart();
+renderAllSessionData();
