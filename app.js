@@ -2,6 +2,7 @@ const STORAGE_KEY = 'unifin-local-v1';
 const DEFAULT_STATE = {
   income: 6500000,
   expense: 3050000,
+  ledgerVersion: 2,
   budget: 5000000,
   transactions: [],
   loaned: 0,
@@ -41,7 +42,7 @@ function loadState() {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return clone(DEFAULT_STATE);
     const parsed = JSON.parse(stored);
-    return {
+    const state = {
       ...clone(DEFAULT_STATE),
       ...parsed,
       loaned: Number(parsed.loaned || 0),
@@ -53,6 +54,14 @@ function loadState() {
       },
       debtStatus: { ...(parsed.debtStatus || {}) }
     };
+    if (Number(parsed.ledgerVersion || 1) < 2) {
+      state.expense += state.transactions
+        .filter((item) => item.type === 'lend')
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      state.ledgerVersion = 2;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+    return state;
   } catch {
     return clone(DEFAULT_STATE);
   }
@@ -225,6 +234,7 @@ function addTransaction(item) {
   sessionState.transactions.unshift(item);
   if (item.type === 'income') sessionState.income += item.amount;
   if (item.type === 'expense') sessionState.expense += item.amount;
+  if (item.type === 'lend') sessionState.expense += item.amount;
   if (item.type === 'lend') sessionState.loaned += item.amount;
   if (item.type === 'borrow') sessionState.borrowed += item.amount;
   persistState();
