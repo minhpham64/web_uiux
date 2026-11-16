@@ -4,6 +4,8 @@ const DEFAULT_STATE = {
   expense: 3050000,
   budget: 5000000,
   transactions: [],
+  loaned: 0,
+  borrowed: 0,
   savings: [4200000, 2500000, 1150000],
   debts: {
     lend: [],
@@ -23,6 +25,8 @@ function loadState() {
     return {
       ...clone(DEFAULT_STATE),
       ...parsed,
+      loaned: Number(parsed.loaned || 0),
+      borrowed: Number(parsed.borrowed || 0),
       savings: Array.isArray(parsed.savings) ? parsed.savings : clone(DEFAULT_STATE.savings),
       debts: {
         ...clone(DEFAULT_STATE.debts),
@@ -64,7 +68,7 @@ function toast(message) {
 }
 
 function updateSummary() {
-  const balance = sessionState.income - sessionState.expense;
+  const balance = sessionState.income - sessionState.expense - sessionState.loaned + sessionState.borrowed;
   const remaining = Math.max(sessionState.budget - sessionState.expense, 0);
   document.querySelector('[data-role="balance"]')?.replaceChildren(document.createTextNode(money(balance)));
   document.querySelector('[data-role="income-total"]')?.replaceChildren(document.createTextNode(`+${money(sessionState.income)}`));
@@ -80,9 +84,10 @@ function transactionDetail(item) {
 }
 
 function transactionRow(item) {
-  const sign = item.type === 'income' ? '+' : '-';
+  const positive = item.type === 'income' || item.type === 'borrow';
+  const sign = positive ? '+' : '-';
   const category = item.type === 'income' ? 'Khoản mới' : 'Khoản mới';
-  return `<tr class="session-row"><td>${item.date}</td><td><span class="pill${item.type === 'income' ? ' green' : ''}">${category}</span></td><td><strong>${item.label}</strong></td><td>${item.wallet}</td><td class="amount${item.type === 'income' ? ' green' : ''}">${sign}${money(item.amount)}</td></tr>`;
+  return `<tr class="session-row"><td>${item.date}</td><td><span class="pill${positive ? ' green' : ''}">${category}</span></td><td><strong>${item.label}</strong></td><td>${item.wallet}</td><td class="amount${positive ? ' green' : ''}">${sign}${money(item.amount)}</td></tr>`;
 }
 
 function renderSessionTables() {
@@ -140,7 +145,8 @@ function renderRecentTransactions() {
   [...sessionState.transactions].reverse().forEach((item) => {
     const row = document.createElement('div');
     row.className = 'list-row session-row';
-    row.innerHTML = `<span><strong>${item.type === 'income' ? '▣' : '•'} ${item.label}</strong><small>${transactionDetail(item)}</small></span><b class="amount${item.type === 'income' ? ' green' : ''}">${item.type === 'income' ? '+' : '-'}${money(item.amount)}</b>`;
+    const positive = item.type === 'income' || item.type === 'borrow';
+    row.innerHTML = `<span><strong>${positive ? '▣' : '•'} ${item.label}</strong><small>${transactionDetail(item)}</small></span><b class="amount${positive ? ' green' : ''}">${positive ? '+' : '-'}${money(item.amount)}</b>`;
     target.prepend(row);
   });
   while (target.children.length > 8) target.lastElementChild.remove();
@@ -159,6 +165,8 @@ function addTransaction(item) {
   sessionState.transactions.unshift(item);
   if (item.type === 'income') sessionState.income += item.amount;
   if (item.type === 'expense') sessionState.expense += item.amount;
+  if (item.type === 'lend') sessionState.loaned += item.amount;
+  if (item.type === 'borrow') sessionState.borrowed += item.amount;
   persistState();
   renderAllSessionData();
 }
@@ -209,11 +217,13 @@ function processModal(modal) {
     toast(`Đã lưu khoản nạp ${money(value)} và đồng bộ mục tiêu tiết kiệm.`);
   } else if (modal.id === 'debt-modal') {
     const type = selectFrom(modal, 0).startsWith('Cho') ? 'lend' : 'borrow';
+    const wallet = selectFrom(modal, 1) || 'Tiền mặt';
     const due = modal.querySelectorAll('input')[2]?.value || 'Chưa đặt hạn';
+    const person = textFrom(modal, 0);
     const item = {
-      person: textFrom(modal, 0),
+      person,
       reason: 'Khoản vay/mượn mới',
-      wallet: 'Tiền mặt',
+      wallet,
       due,
       amount: value,
       date: `Hôm nay`,
@@ -221,6 +231,14 @@ function processModal(modal) {
       statusClass: type === 'lend' ? 'green' : 'red'
     };
     sessionState.debts[type].push(item);
+    addTransaction({
+      type,
+      label: `${type === 'lend' ? 'Cho' : 'Mượn'} ${person}`,
+      category: 'Vay & mượn',
+      wallet,
+      amount: value,
+      date: 'Hôm nay'
+    });
     persistState();
     renderAllSessionData();
     toast(`Đã lưu và đồng bộ khoản ${type === 'lend' ? 'cho vay' : 'đi mượn'} ${money(value)}.`);
