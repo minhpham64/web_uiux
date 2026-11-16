@@ -3,7 +3,12 @@ const DEFAULT_STATE = {
   income: 6500000,
   expense: 3050000,
   budget: 5000000,
-  transactions: []
+  transactions: [],
+  savings: [4200000, 2500000, 1150000],
+  debts: {
+    lend: [],
+    borrow: []
+  }
 };
 
 function clone(value) {
@@ -13,7 +18,17 @@ function clone(value) {
 function loadState() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? { ...clone(DEFAULT_STATE), ...JSON.parse(stored) } : clone(DEFAULT_STATE);
+    if (!stored) return clone(DEFAULT_STATE);
+    const parsed = JSON.parse(stored);
+    return {
+      ...clone(DEFAULT_STATE),
+      ...parsed,
+      savings: Array.isArray(parsed.savings) ? parsed.savings : clone(DEFAULT_STATE.savings),
+      debts: {
+        ...clone(DEFAULT_STATE.debts),
+        ...(parsed.debts || {})
+      }
+    };
   } catch {
     return clone(DEFAULT_STATE);
   }
@@ -55,6 +70,9 @@ function updateSummary() {
   document.querySelector('[data-role="income-total"]')?.replaceChildren(document.createTextNode(`+${money(sessionState.income)}`));
   document.querySelector('[data-role="expense-total"]')?.replaceChildren(document.createTextNode(`-${money(sessionState.expense)}`));
   document.querySelector('[data-role="budget-remaining"]')?.replaceChildren(document.createTextNode(`Còn lại ${money(remaining)}`));
+  document.querySelector('[data-role="budget-spent"]')?.replaceChildren(document.createTextNode(money(sessionState.expense)));
+  const budgetProgress = document.querySelector('[data-role="budget-progress"]');
+  if (budgetProgress) budgetProgress.style.width = `${Math.min((sessionState.expense / sessionState.budget) * 100, 100)}%`;
 }
 
 function transactionDetail(item) {
@@ -79,6 +97,42 @@ function renderSessionTables() {
   [...items].reverse().forEach((item) => body.insertAdjacentHTML('afterbegin', transactionRow(item)));
 }
 
+function debtRow(item, type) {
+  const isLend = type === 'lend';
+  return `<tr class="session-row"><td>${item.date}</td><td><strong>${item.person}</strong></td><td>${item.reason}</td><td>${item.wallet}</td><td>${item.due}</td><td class="amount${isLend ? ' green' : ' red'}">${money(item.amount)}</td><td><span class="pill ${item.statusClass}">${item.status}</span></td></tr>`;
+}
+
+function renderDebts() {
+  if (!isPage('debts.html')) return;
+  const sections = document.querySelectorAll('.debt-section');
+  if (sections.length < 2) return;
+  sections.forEach((section) => section.querySelectorAll('.session-row').forEach((row) => row.remove()));
+  [...sessionState.debts.lend].reverse().forEach((item) => sections[0].querySelector('tbody')?.insertAdjacentHTML('afterbegin', debtRow(item, 'lend')));
+  [...sessionState.debts.borrow].reverse().forEach((item) => sections[1].querySelector('tbody')?.insertAdjacentHTML('afterbegin', debtRow(item, 'borrow')));
+  const totals = [
+    sessionState.debts.lend.reduce((sum, item) => sum + item.amount, 1150000),
+    sessionState.debts.borrow.reduce((sum, item) => sum + item.amount, 450000),
+    700000 + sessionState.debts.lend.reduce((sum, item) => sum + item.amount, 0) - sessionState.debts.borrow.reduce((sum, item) => sum + item.amount, 0)
+  ];
+  document.querySelector('[data-role="lend-total"]')?.replaceChildren(document.createTextNode(money(totals[0])));
+  document.querySelector('[data-role="borrow-total"]')?.replaceChildren(document.createTextNode(money(totals[1])));
+  document.querySelector('[data-role="net-debt-total"]')?.replaceChildren(document.createTextNode(`+${money(totals[2])}`));
+}
+
+function renderSavings() {
+  if (!isPage('savings.html')) return;
+  document.querySelectorAll('.goal-card').forEach((card, index) => {
+    const saved = sessionState.savings[index] || DEFAULT_STATE.savings[index];
+    const target = [15000000, 3000000, 2500000][index];
+    const value = card.querySelector('.goal-body .value');
+    const progress = card.querySelector('.goal-body .progress i');
+    const detail = card.querySelector('.goal-body .sub');
+    value?.replaceChildren(document.createTextNode(money(saved)));
+    if (progress) progress.style.width = `${Math.min((saved / target) * 100, 100)}%`;
+    if (detail) detail.textContent = `Mục tiêu: ${money(target)} (Còn thiếu ${money(Math.max(target - saved, 0))})`;
+  });
+}
+
 function renderRecentTransactions() {
   const target = document.querySelector('#recent-transactions');
   if (!target) return;
@@ -96,6 +150,8 @@ function renderAllSessionData() {
   updateSummary();
   renderRecentTransactions();
   renderSessionTables();
+  renderDebts();
+  renderSavings();
   renderChart(sessionState.chartMode || 'bars');
 }
 
@@ -146,9 +202,28 @@ function processModal(modal) {
     addTransaction({ type: 'expense', label, category, wallet: 'Tiền mặt', amount: value, date: `Hôm nay • ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` });
     toast(`Đã lưu và đồng bộ khoản chi ${money(value)} trên toàn bộ trang.`);
   } else if (modal.id === 'saving-modal') {
-    toast(`Đã lưu khoản nạp ${money(value)} vào quỹ trên trình duyệt.`);
+    const goalIndex = modal.querySelector('select')?.selectedIndex || 0;
+    sessionState.savings[goalIndex] = (sessionState.savings[goalIndex] || DEFAULT_STATE.savings[goalIndex]) + value;
+    persistState();
+    renderAllSessionData();
+    toast(`Đã lưu khoản nạp ${money(value)} và đồng bộ mục tiêu tiết kiệm.`);
   } else if (modal.id === 'debt-modal') {
-    toast(`Đã lưu khoản vay/mượn ${money(value)} vào trình duyệt.`);
+    const type = selectFrom(modal, 0).startsWith('Cho') ? 'lend' : 'borrow';
+    const due = modal.querySelectorAll('input')[2]?.value || 'Chưa đặt hạn';
+    const item = {
+      person: textFrom(modal, 0),
+      reason: 'Khoản vay/mượn mới',
+      wallet: 'Tiền mặt',
+      due,
+      amount: value,
+      date: `Hôm nay`,
+      status: type === 'lend' ? 'Chưa trả' : 'Chưa thanh toán',
+      statusClass: type === 'lend' ? 'green' : 'red'
+    };
+    sessionState.debts[type].push(item);
+    persistState();
+    renderAllSessionData();
+    toast(`Đã lưu và đồng bộ khoản ${type === 'lend' ? 'cho vay' : 'đi mượn'} ${money(value)}.`);
   }
   return true;
 }
